@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="description" content="AnimeFlux — Streaming d'animés en ligne, sans base de données."/>
+  <title>AnimeFlux</title>
+
+  <!-- Police Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@400;600;700&display=swap"
+        rel="stylesheet"/>
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="css/style.css"/>
+
+  <!-- Favicon SVG inline -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>
+    <rect width='32' height='32' rx='6' fill='%23e63946'/>
+    <text x='16' y='24' font-size='20' text-anchor='middle' fill='white' font-family='serif'>▶</text>
+  </svg>"/>
+</head>
+<body>
+
+<!-- ============================================================
+     BARRE DE NAVIGATION
+     ============================================================ -->
+<nav>
+  <div class="logo" onclick="goHome()">ANIME<span>FLUX</span></div>
+
+  <div class="search-bar">
+    <input type="text"
+           id="searchInput"
+           placeholder="Rechercher un animé..."
+           onkeydown="handleSearchKey(event)"
+           autocomplete="off"/>
+    <button onclick="doSearch()" title="Rechercher">&#128269;</button>
+  </div>
+
+  <div class="nav-tabs">
+    <button class="nav-tab active" id="tab-home" onclick="switchTab('home')">Accueil</button>
+    <button class="nav-tab"        id="tab-top"  onclick="switchTab('top')">Top</button>
+    <button class="nav-tab"        id="tab-fav"  onclick="switchTab('fav')">&#9829; Favoris</button>
+  </div>
+</nav>
+
+<!-- ============================================================
+     ZONE DE CONTENU PRINCIPAL
+     ============================================================ -->
+<main id="content"></main>
+
+<!-- ============================================================
+     SCRIPT PRINCIPAL (module ES6)
+     ============================================================ -->
+<script type="module" src="js/app.js"></script>
+
+</body>
+</html>
