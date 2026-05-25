@@ -1,26 +1,24 @@
-/**
- * app.js — Application principale AnimeFlux
- * Gestion des vues, navigation, modal, favoris
- * Auteur : Seydou | UTM Burkina Faso
- */
-
 import {
-  getTrending, getTopRated, searchAnime, getByGenre, getAnimeById
+  getTrending, getTopRated, searchAnime, getByGenre, getAnimeById,
+  getCurrentSeason, getAnimeRecommendations,
 } from './api.js';
 import { AnimePlayer } from './player.js';
 
 /* ============================================================
    ÉTAT GLOBAL
    ============================================================ */
-
 const state = {
   tab: 'home',
   favorites: JSON.parse(localStorage.getItem('animeflux_favs') || '[]'),
-  cache: {},          // cache animé : id → objet complet
-  player: null,       // instance AnimePlayer (créée à l'ouverture du modal)
+  history: JSON.parse(localStorage.getItem('animeflux_history') || '[]'),
+  cache: {},
+  player: null,
   heroAnimes: [],
   heroIdx: 0,
   heroTimer: null,
+  trendingPage: 1,
+  trendingLoading: false,
+  searchDebounce: null,
 };
 
 const GENRES = [
@@ -30,9 +28,49 @@ const GENRES = [
 ];
 
 /* ============================================================
+   WATCHED (standalone, sans player)
+   ============================================================ */
+const _watchedSet = new Set(
+  JSON.parse(localStorage.getItem('animeflux_watched') || '[]')
+);
+
+function isWatched(title, epNum) {
+  return _watchedSet.has(`${title}::${epNum}`);
+}
+
+/* ============================================================
+   HISTORIQUE
+   ============================================================ */
+function saveHistory(anime, epNum) {
+  state.history = state.history.filter(h => h.id !== anime.id);
+  state.history.unshift({
+    id: anime.id,
+    title: anime.title?.romaji || '???',
+    epNum,
+    coverImage: anime.coverImage?.large || null,
+    episodes: anime.episodes,
+    watchedAt: Date.now(),
+  });
+  state.history = state.history.slice(0, 10);
+  localStorage.setItem('animeflux_history', JSON.stringify(state.history));
+}
+
+function historyCard(h) {
+  return `
+  <div class="history-card" onclick="openModal(${h.id})" title="${h.title}">
+    <div class="history-img-wrap">
+      ${h.coverImage
+        ? `<img src="${h.coverImage}" alt="${h.title}" loading="lazy"/>`
+        : `<div class="anime-card-placeholder">🎬</div>`}
+      <span class="history-ep-badge">Ép. ${h.epNum}</span>
+    </div>
+    <div class="history-title">${h.title}</div>
+  </div>`;
+}
+
+/* ============================================================
    FAVORIS
    ============================================================ */
-
 function saveFavs() {
   localStorage.setItem('animeflux_favs', JSON.stringify(state.favorites));
 }
@@ -66,7 +104,6 @@ function refreshFavBtn(id) {
 /* ============================================================
    TOAST
    ============================================================ */
-
 function toast(msg, duration = 2200) {
   const el = document.createElement('div');
   el.className = 'toast';
@@ -78,18 +115,16 @@ function toast(msg, duration = 2200) {
 /* ============================================================
    NAVIGATION
    ============================================================ */
-
 window.switchTab = function(tab) {
   state.tab = tab;
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
   const btn = document.getElementById(`tab-${tab}`);
   if (btn) btn.classList.add('active');
-
   clearInterval(state.heroTimer);
-
   if (tab === 'home')  renderHome();
   if (tab === 'top')   renderTop();
   if (tab === 'fav')   renderFavPage();
+  if (tab === 'hist')  renderHistoryPage();
 };
 
 window.goHome = () => window.switchTab('home');
@@ -102,10 +137,17 @@ window.doSearch = () => {
   renderSearch(q);
 };
 
+/* Recherche avec debounce depuis l'input */
+document.getElementById('searchInput')?.addEventListener('input', () => {
+  clearTimeout(state.searchDebounce);
+  const q = document.getElementById('searchInput').value.trim();
+  if (q.length < 3) return;
+  state.searchDebounce = setTimeout(() => renderSearch(q), 400);
+});
+
 /* ============================================================
    HERO CAROUSEL
    ============================================================ */
-
 function buildHero(animes) {
   state.heroAnimes = animes.slice(0, 6);
   state.heroIdx = 0;
@@ -162,7 +204,6 @@ window.heroGo = (i) => { state.heroIdx = i; renderHeroSlide(); };
 /* ============================================================
    HELPERS HTML
    ============================================================ */
-
 function skeletonGrid(n = 10) {
   return `<div class="anime-grid">${Array(n).fill(0).map(() => `
     <div class="skeleton-card">
@@ -199,17 +240,34 @@ function animeCard(a) {
 /* ============================================================
    VUES PRINCIPALES
    ============================================================ */
-
 async function renderHome() {
+  state.trendingPage = 1;
   const c = document.getElementById('content');
   c.innerHTML = `
     <div class="hero" id="hero-section"></div>
+
+    ${state.history.length ? `
     <div class="section">
       <div class="section-header">
-        <span class="section-title">Tendances</span>
+        <span class="section-title">▶ Continuer à regarder</span>
+        <button class="section-link" onclick="window.switchTab('hist')">Tout l'historique →</button>
       </div>
+      <div class="history-row">${state.history.slice(0, 6).map(historyCard).join('')}</div>
+    </div>` : ''}
+
+    <div class="section">
+      <div class="section-header"><span class="section-title">🔥 Tendances</span></div>
       <div id="trending-grid">${skeletonGrid(10)}</div>
+      <div id="load-more-wrap" style="display:none;text-align:center;margin-top:24px">
+        <button class="btn-load-more" id="btn-load-more" onclick="loadMoreTrending()">Charger plus ↓</button>
+      </div>
     </div>
+
+    <div class="section" style="padding-top:0">
+      <div class="section-header"><span class="section-title">🌸 Cette Saison</span></div>
+      <div id="season-grid">${skeletonGrid(10)}</div>
+    </div>
+
     <div class="section" style="padding-top:0">
       <div class="section-header"><span class="section-title">Genres</span></div>
       <div class="genre-pills">
@@ -220,10 +278,18 @@ async function renderHome() {
     </div>`;
 
   try {
-    const list = await getTrending(1, 20);
-    buildHero(list);
+    const [trending, seasonal] = await Promise.all([
+      getTrending(1, 20),
+      getCurrentSeason(1, 12),
+    ]);
+    buildHero(trending);
     document.getElementById('trending-grid').innerHTML =
-      `<div class="anime-grid">${list.map(animeCard).join('')}</div>`;
+      `<div class="anime-grid" id="trending-inner">${trending.map(animeCard).join('')}</div>`;
+    document.getElementById('load-more-wrap').style.display = 'block';
+    document.getElementById('season-grid').innerHTML =
+      `<div class="anime-grid">${seasonal.map(animeCard).join('')}</div>`;
+    trending.forEach(a => { state.cache[a.id] = a; });
+    seasonal.forEach(a => { state.cache[a.id] = a; });
   } catch (e) {
     document.getElementById('trending-grid').innerHTML =
       `<div class="empty"><div class="empty-icon">⚠️</div>
@@ -232,15 +298,32 @@ async function renderHome() {
   }
 }
 
+window.loadMoreTrending = async () => {
+  if (state.trendingLoading) return;
+  state.trendingLoading = true;
+  const btn = document.getElementById('btn-load-more');
+  if (btn) btn.textContent = 'Chargement…';
+  state.trendingPage++;
+  try {
+    const list = await getTrending(state.trendingPage, 20);
+    list.forEach(a => { state.cache[a.id] = a; });
+    const inner = document.getElementById('trending-inner');
+    if (inner) inner.insertAdjacentHTML('beforeend', list.map(animeCard).join(''));
+  } catch (e) {}
+  if (btn) btn.textContent = 'Charger plus ↓';
+  state.trendingLoading = false;
+};
+
 async function renderTop() {
   const c = document.getElementById('content');
   c.innerHTML = `
     <div class="section">
-      <div class="section-header"><span class="section-title">Top Animés — Tous les temps</span></div>
+      <div class="section-header"><span class="section-title">🏆 Top Animés — Tous les temps</span></div>
       <div id="top-grid">${skeletonGrid(20)}</div>
     </div>`;
   try {
     const list = await getTopRated(1, 20);
+    list.forEach(a => { state.cache[a.id] = a; });
     document.getElementById('top-grid').innerHTML =
       `<div class="anime-grid">${list.map(animeCard).join('')}</div>`;
   } catch (e) {
@@ -260,6 +343,7 @@ async function renderSearch(q) {
     <div class="section"><div id="search-grid">${skeletonGrid(10)}</div></div>`;
   try {
     const list = await searchAnime(q);
+    list.forEach(a => { state.cache[a.id] = a; });
     document.getElementById('search-grid').innerHTML = list.length
       ? `<div class="anime-grid">${list.map(animeCard).join('')}</div>`
       : `<div class="empty"><div class="empty-icon">🔍</div>
@@ -287,12 +371,41 @@ function renderFavPage() {
     </div>`;
 }
 
+function renderHistoryPage() {
+  clearInterval(state.heroTimer);
+  const c = document.getElementById('content');
+  if (!state.history.length) {
+    c.innerHTML = `<div class="empty" style="padding:80px 20px">
+      <div class="empty-icon">📺</div>
+      <h3>Aucun historique</h3>
+      <p>Regardez un épisode pour le voir apparaître ici.</p>
+    </div>`;
+    return;
+  }
+  c.innerHTML = `
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">📺 Historique</span>
+        <button class="section-link" onclick="clearHistory()" style="color:var(--accent)">Tout effacer</button>
+      </div>
+      <div class="history-row">${state.history.map(historyCard).join('')}</div>
+    </div>`;
+}
+
+window.clearHistory = () => {
+  state.history = [];
+  localStorage.removeItem('animeflux_history');
+  renderHistoryPage();
+  toast('Historique effacé');
+};
+
 window.filterGenre = async (g, btn) => {
   document.querySelectorAll('.genre-pill').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('trending-grid').innerHTML = skeletonGrid(10);
   try {
     const list = await getByGenre(g);
+    list.forEach(a => { state.cache[a.id] = a; });
     document.getElementById('trending-grid').innerHTML =
       `<div class="anime-grid">${list.map(animeCard).join('')}</div>`;
   } catch (e) {}
@@ -301,9 +414,7 @@ window.filterGenre = async (g, btn) => {
 /* ============================================================
    MODAL DÉTAIL + LECTEUR
    ============================================================ */
-
 window.openModal = async (id) => {
-  /* Charger les données si pas encore en cache */
   if (!state.cache[id]) {
     try {
       state.cache[id] = await getAnimeById(id);
@@ -314,6 +425,18 @@ window.openModal = async (id) => {
   }
   renderModal(state.cache[id]);
 };
+
+function buildEpBtns(from, to, title) {
+  return Array.from({ length: to - from + 1 }, (_, i) => {
+    const num = from + i;
+    const watched = isWatched(title, num);
+    return `<button class="ep-btn${watched ? ' watched' : ''}"
+                    id="ep-${num}"
+                    onclick="selectEp(${num},'${encodeURIComponent(title)}')">
+              ${num}
+            </button>`;
+  }).join('');
+}
 
 function renderModal(a) {
   const old = document.getElementById('modal-overlay');
@@ -328,11 +451,11 @@ function renderModal(a) {
   const year    = a.seasonYear || '';
   const studio  = a.studios?.nodes?.[0]?.name || '';
   const genres  = (a.genres || []).slice(0, 6).map(g => `<span class="modal-tag">${g}</span>`).join('');
-  const favIcon = isFav(a.id) ? '❤️' : '🤍';
   const img     = a.coverImage?.large;
   const maxEp   = Math.min(a.episodes || 13, 200);
 
-  /* Construction des boutons d'épisodes par tranches de 50 */
+  const shareUrl = `${window.location.origin}${window.location.pathname}?anime=${a.id}`;
+
   const ranges = [];
   for (let i = 0; i < maxEp; i += 50) {
     ranges.push({ from: i + 1, to: Math.min(i + 50, maxEp) });
@@ -358,7 +481,6 @@ function renderModal(a) {
     <div class="modal">
       <button class="modal-close" onclick="closeModal()">✕</button>
 
-      <!-- En-tête -->
       <div class="modal-hero">
         ${img
           ? `<div class="modal-poster"><img src="${img}" alt="${title}"/></div>`
@@ -375,7 +497,10 @@ function renderModal(a) {
             <button class="modal-fav-btn${isFav(a.id) ? ' active' : ''}"
                     id="fav-btn-${a.id}"
                     onclick="toggleFavModal(${a.id})">
-              ${favIcon}
+              ${isFav(a.id) ? '❤️' : '🤍'}
+            </button>
+            <button class="modal-share-btn" onclick="shareAnime('${encodeURIComponent(title)}','${shareUrl}')" title="Partager">
+              🔗
             </button>
           </div>
           <div class="modal-desc">${desc}</div>
@@ -383,7 +508,6 @@ function renderModal(a) {
         </div>
       </div>
 
-      <!-- Lecteur vidéo -->
       <div class="player-section">
         <div class="player-section-title">
           <div class="dot"></div> LECTEUR VIDÉO
@@ -397,34 +521,35 @@ function renderModal(a) {
         </div>
       </div>
 
-      <!-- Épisodes -->
       <div class="episodes-section">
         <div class="player-section-title">ÉPISODES</div>
         <div class="ep-controls">
-          ${rangesHTML
-            ? `<span class="ep-range-label">Plage :</span>${rangesHTML}`
-            : ''}
+          ${rangesHTML ? `<span class="ep-range-label">Plage :</span>${rangesHTML}` : ''}
         </div>
         <div class="ep-grid" id="ep-grid">${epBtns}</div>
+      </div>
+
+      <div class="section" style="padding:0 0 8px" id="reco-section">
+        <div class="player-section-title">RECOMMANDATIONS</div>
+        <div id="reco-grid" class="anime-grid" style="margin-top:12px">${skeletonGrid(4).replace('anime-grid','').replace('</div>','')}</div>
       </div>
     </div>`;
 
   document.body.appendChild(overlay);
+  state.player = new AnimePlayer('video-wrapper', 'player-state', a);
 
-  /* Initialiser le player */
-  state.player = new AnimePlayer('video-wrapper', 'player-state');
-}
-
-function buildEpBtns(from, to, title) {
-  return Array.from({ length: to - from + 1 }, (_, i) => {
-    const num = from + i;
-    const watched = state.player?.isWatched(title, num);
-    return `<button class="ep-btn${watched ? ' watched' : ''}"
-                    id="ep-${num}"
-                    onclick="selectEp(${num},'${encodeURIComponent(title)}')">
-              ${num}
-            </button>`;
-  }).join('');
+  /* Charger les recommandations en parallèle */
+  getAnimeRecommendations(a.id).then(recs => {
+    const grid = document.getElementById('reco-grid');
+    if (grid && recs.length) {
+      recs.forEach(r => { state.cache[r.id] = r; });
+      grid.innerHTML = recs.map(animeCard).join('');
+    } else if (grid) {
+      grid.closest('.section')?.remove();
+    }
+  }).catch(() => {
+    document.getElementById('reco-section')?.remove();
+  });
 }
 
 window.showEpRange = (from, to, titleEnc, btn) => {
@@ -437,19 +562,30 @@ window.showEpRange = (from, to, titleEnc, btn) => {
 window.selectEp = async (num, titleEnc) => {
   const title = decodeURIComponent(titleEnc);
 
-  /* Mettre en évidence le bouton */
   document.querySelectorAll('.ep-btn').forEach(b => {
     b.classList.remove('active');
     if (parseInt(b.id.replace('ep-','')) === num) b.classList.add('active');
   });
 
-  /* Scroller jusqu'au player */
   document.getElementById('video-wrapper')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-  /* Lancer la lecture */
   if (state.player) {
     await state.player.load(title, num);
+    /* Sauvegarder dans l'historique */
+    const anime = Object.values(state.cache).find(a => (a.title?.romaji || '') === title);
+    if (anime) saveHistory(anime, num);
   }
+};
+
+window.shareAnime = async (titleEnc, url) => {
+  const title = decodeURIComponent(titleEnc);
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: `AnimeFlux — ${title}`, url });
+      return;
+    } catch (_) {}
+  }
+  navigator.clipboard.writeText(url).then(() => toast('🔗 Lien copié !'));
 };
 
 window.closeModal = () => {
@@ -461,10 +597,24 @@ window.closeModal = () => {
 
 window.toggleFavModal = (id) => toggleFav(id);
 
-/* Fermer avec Escape */
-document.addEventListener('keydown', e => { if (e.key === 'Escape') window.closeModal(); });
+/* Fermer avec Escape, navigation hero avec flèches */
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') window.closeModal();
+  if (e.key === 'ArrowLeft' && state.heroAnimes.length) {
+    state.heroIdx = (state.heroIdx - 1 + state.heroAnimes.length) % state.heroAnimes.length;
+    renderHeroSlide();
+  }
+  if (e.key === 'ArrowRight' && state.heroAnimes.length) {
+    state.heroIdx = (state.heroIdx + 1) % state.heroAnimes.length;
+    renderHeroSlide();
+  }
+});
+
+/* Ouvrir directement un animé si ?anime=ID dans l'URL */
+const urlAnimeId = new URLSearchParams(window.location.search).get('anime');
+if (urlAnimeId) window.openModal(parseInt(urlAnimeId));
 
 /* ============================================================
-   INITIALISATION
+   INIT
    ============================================================ */
 renderHome();

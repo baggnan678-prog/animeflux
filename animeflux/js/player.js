@@ -69,7 +69,8 @@ export class AnimePlayer {
    * @param {string} containerId - ID du div conteneur du player
    * @param {string} stateId     - ID du div d'état (spinner/message)
    */
-  constructor(containerId, stateId) {
+  constructor(containerId, stateId, anime = null) {
+    this.anime     = anime;
     this.container = document.getElementById(containerId);
     this.stateDiv  = document.getElementById(stateId);
     this.hls       = null;           // instance HLS.js

@@ -188,3 +188,32 @@ export async function resolveStream(title, epNum) {
 
   return { sources, headers, episodeId: episode.id };
 }
+
+export async function getCurrentSeason(page = 1, perPage = 20) {
+  const now = new Date();
+  const month = now.getMonth();
+  const year = now.getFullYear();
+  const seasons = ['WINTER','SPRING','SUMMER','FALL'];
+  const season = seasons[Math.floor(month / 3)];
+  const q = `query($season:MediaSeason $year:Int $page:Int $perPage:Int){
+    Page(page:$page perPage:$perPage){
+      media(season:$season seasonYear:$year sort:POPULARITY_DESC type:ANIME isAdult:false){ ${MEDIA_FIELDS} }
+    }
+  }`;
+  const d = await queryAniList(q, { season, year, page, perPage });
+  return d.Page.media;
+}
+
+export async function getAnimeRecommendations(id) {
+  const q = `query($id:Int){
+    Media(id:$id type:ANIME){
+      recommendations(sort:RATING_DESC perPage:6){
+        nodes{ mediaRecommendation{ ${MEDIA_FIELDS} } }
+      }
+    }
+  }`;
+  const d = await queryAniList(q, { id });
+  return (d.Media.recommendations.nodes || [])
+    .map(n => n.mediaRecommendation)
+    .filter(Boolean);
+}

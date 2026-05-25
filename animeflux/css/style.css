@@ -777,3 +777,89 @@ nav {
   .modal-title { font-size: 22px; }
   .ep-grid { grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 5px; }
 }
+
+/* ── Historique / Continuer à regarder ── */
+.history-row {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.history-card {
+  flex-shrink: 0;
+  width: 110px;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.history-card:hover { transform: scale(1.04); }
+.history-img-wrap {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  aspect-ratio: 2/3;
+  background: var(--surface2);
+}
+.history-img-wrap img { width:100%; height:100%; object-fit:cover; }
+.history-ep-badge {
+  position: absolute;
+  bottom: 4px; right: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.history-title {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Charger plus ── */
+.btn-load-more {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 32px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn-load-more:hover {
+  background: var(--surface3);
+  border-color: var(--accent);
+}
+
+/* ── Section link ── */
+.section-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+}
+.section-link:hover { text-decoration: underline; }
+
+/* ── Bouton partager modal ── */
+.modal-share-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+  color: var(--text);
+}
+.modal-share-btn:hover { background: var(--surface3); }
